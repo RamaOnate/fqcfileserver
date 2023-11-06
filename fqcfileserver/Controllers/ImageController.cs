@@ -1,6 +1,8 @@
 ﻿using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Newtonsoft.Json;
+using System.Data;
 
 namespace fqcfileserver.Controllers
 {
@@ -9,7 +11,6 @@ namespace fqcfileserver.Controllers
     public class ImageController : ControllerBase
     {
         [HttpPost("upload")]
-        //[EnableCors("MyPolicy")]
         public async Task<IActionResult> Upload(IFormFile file, string machineSerialNumber)
         {
             // images will be saved under a folder that has the machineSerialNumber
@@ -54,7 +55,97 @@ namespace fqcfileserver.Controllers
             }
 
             // return the file path to the client
-            return Ok(new { filePath, fileName });
+            // this path will be relative and will be of the form images/{machineSerialNumber}/{fileName}
+            var relativeFilePath = filePath.Replace(Directory.GetCurrentDirectory(), "");
+            relativeFilePath = relativeFilePath.Replace("\\", "/");
+            return Ok(new { filePath = relativeFilePath, fileName });
+        }
+
+        [HttpPost("edit")]
+        public async Task<IActionResult> replacePicture(IFormFile file, string pathOfFileToDelete, string machineSerialNumber)
+        {
+            var fileExtension = Path.GetExtension(file.FileName);
+
+            // get the file name without the extension
+            var newFileName = Path.GetFileNameWithoutExtension(file.FileName);
+
+            // get the file path
+            var oldFilePath = Path.Combine(Directory.GetCurrentDirectory(), pathOfFileToDelete);
+            oldFilePath = oldFilePath.Replace("/images/", "");
+            oldFilePath = oldFilePath.Substring(oldFilePath.LastIndexOf("/") + 1);
+
+            // obtain full absolute path of the file to delete
+            oldFilePath = Path.Combine(Directory.GetCurrentDirectory(), "images", machineSerialNumber, oldFilePath);
+
+            // check if the file exists before deleting it
+            if (!System.IO.File.Exists(oldFilePath))
+            {
+                return NotFound();
+            }
+
+            System.IO.File.Delete(oldFilePath);
+
+            var newFilePath = Path.Combine(Directory.GetCurrentDirectory(), "images", machineSerialNumber, file.FileName);
+
+            // save the file
+            using (var stream = new FileStream(newFilePath, FileMode.Create))
+            {
+                await file.CopyToAsync(stream);
+            }
+
+            var relativeFilePath = newFilePath.Replace(Directory.GetCurrentDirectory(), "");
+            relativeFilePath = relativeFilePath.Replace("\\", "/");
+            return Ok(new { filePath = relativeFilePath, file.FileName });
+            
+        }
+
+        [HttpPost("delete")]
+        public IActionResult Delete(string pathOfFileToDelete, string machineSerialNumber)
+        {
+            // obtain full absolute path of the file to delete
+            var oldFilePath = Path.Combine(Directory.GetCurrentDirectory(), pathOfFileToDelete);
+            oldFilePath = oldFilePath.Replace("/images/", "");
+            oldFilePath = oldFilePath.Substring(oldFilePath.LastIndexOf("/") + 1);
+
+            // obtain full absolute path of the file to delete
+            oldFilePath = Path.Combine(Directory.GetCurrentDirectory(), "images", machineSerialNumber, oldFilePath);
+            // check if the file exists before deleting it
+            if (!System.IO.File.Exists(oldFilePath))
+            {
+                return NotFound();
+            }
+
+            System.IO.File.Delete(oldFilePath);
+
+            return Ok();
+        }
+
+        [HttpGet("get")]
+        public IActionResult GetMultiple(string machineSerialNumber)
+        {
+            // get all the files in the machineSerialNumber folder
+            var files = Directory.GetFiles(Path.Combine(Directory.GetCurrentDirectory(), "images", machineSerialNumber));
+
+            // return the file paths to the client
+            // these paths will be relative and will be of the form images/{machineSerialNumber}/{fileName}
+            var relativeFilePaths = new DataTable();
+
+            relativeFilePaths.Columns.Add("filePath", typeof(string));
+
+            foreach (var file in files)
+            {
+                // but only add full absolute paths to the list, not just the stored relatives
+                var fullAbsolutePath = Path.Combine(Directory.GetCurrentDirectory(), "images", machineSerialNumber);
+                fullAbsolutePath = fullAbsolutePath.Replace("\\", "/");
+                var relativeFilePath = file.Replace(fullAbsolutePath, "");
+                relativeFilePath = relativeFilePath.Replace("\\", "/");
+                relativeFilePaths.Rows.Add(relativeFilePath);
+            }
+
+            // convert relativeFilePaths to a json string
+            var json = JsonConvert.SerializeObject(relativeFilePaths);
+            return Ok(json);
+
         }
 
     }
